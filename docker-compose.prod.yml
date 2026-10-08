@@ -22,8 +22,8 @@ services:
       - honey_data:/srv/data
     networks:
       coolify:
-        ipv4_address: 10.0.2.50
-        ipv6_address: fdc9:f46e:be08::50
+        ipv4_address: ${HONEY_IPV4:-10.0.2.50}
+        ipv6_address: ${HONEY_IPV6:-fdc9:f46e:be08::50}
     security_opt:
       - no-new-privileges:true
     cap_drop:
