@@ -19,4 +19,7 @@ http:
     honey-service:
       loadBalancer:
         servers:
-          - url: "http://honey-im-home:8078"
+          # Must match a real Docker-DNS name on the Traefik network.
+          # With docker-compose.prod.yml the container alias is `honey`;
+          # prefer Traefik docker labels instead of this file when possible.
+          - url: "http://honey:8078"
