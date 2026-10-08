@@ -1,0 +1,22 @@
+# File-provider fallback if docker labels are not used.
+# Copy to /data/coolify/proxy/dynamic/honey.yaml on the Traefik host.
+http:
+  routers:
+    honey-https:
+      entryPoints: [https]
+      rule: "Host(`honey.rajlabs.in`)"
+      middlewares: [authentik-auth@file]
+      service: honey-service
+      tls: { certresolver: letsencrypt }
+      priority: 200
+    honey-http:
+      entryPoints: [http]
+      rule: "Host(`honey.rajlabs.in`)"
+      middlewares: [redirect-to-https@file]
+      service: honey-service
+      priority: 200
+  services:
+    honey-service:
+      loadBalancer:
+        servers:
+          - url: "http://honey-im-home:8078"

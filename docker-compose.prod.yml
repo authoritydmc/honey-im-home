@@ -1,0 +1,35 @@
+services:
+  honey:
+    build: .
+    image: ghcr.io/authoritydmc/honey-im-home:latest
+    restart: unless-stopped
+    # PROD: honeypot owns host port 22, API only on tailnet/localhost
+    ports:
+      - "22:2222"       # attackers -> honeypot
+      - "127.0.0.1:8078:8078"  # API/UI localhost only, Traefik fronts it
+    env_file: .env
+    environment:
+      DATA_DIR: /srv/data
+      HONEYPOT_HOST: 0.0.0.0
+      HONEYPOT_PORT: 2222
+      API_PORT: 8078
+      TRUST_PROXY_AUTH: 1
+    volumes:
+      - honey_data:/srv/data
+    networks:
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.honey-https.rule=Host(`honey.rajlabs.in`)"
+      - "traefik.http.routers.honey-https.entrypoints=https"
+      - "traefik.http.routers.honey-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.honey-https.middlewares=authentik-auth@file"
+      - "traefik.http.routers.honey-http.rule=Host(`honey.rajlabs.in`)"
+      - "traefik.http.routers.honey-http.entrypoints=http"
+      - "traefik.http.routers.honey-http.middlewares=redirect-to-https@file"
+      - "traefik.http.services.honey.loadbalancer.server.port=8078"
+networks:
+  coolify:
+    external: true
+volumes:
+  honey_data:
