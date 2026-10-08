@@ -6,6 +6,17 @@ from .shell import ShellState, handle_line, initial_greeting
 
 BANNER = "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.5"
 
+_SERVERS: dict[int, "HoneyServer"] = {}
+
+def _server_for_process(process) -> "HoneyServer | None":
+    try:
+        conn = process.get_extra_info("connection")
+        if conn is not None:
+            return _SERVERS.get(id(conn))
+    except Exception:
+        pass
+    return None
+
 class HoneyServer(asyncssh.SSHServer):
     def __init__(self, src_ip, src_port):
         self.src_ip = src_ip
@@ -17,7 +28,11 @@ class HoneyServer(asyncssh.SSHServer):
 
     def connection_made(self, conn):
         self.conn = conn
+        _SERVERS[id(conn)] = self
         try:
+            peer = conn.get_extra_info("peername")
+            if peer:
+                self.src_ip, self.src_port = peer[0], peer[1]
             self.client_version = conn.get_extra_info("peer_version", "")
         except Exception:
             pass
@@ -29,6 +44,10 @@ class HoneyServer(asyncssh.SSHServer):
                          "port": self.src_port, "client": self.client_version, "ts": time.time()})
 
     def connection_lost(self, exc):
+        try:
+            _SERVERS.pop(id(self.conn), None)
+        except Exception:
+            pass
         try:
             d = dbmod.db()
             d.execute("UPDATE sessions SET ended_at=? WHERE id=?", (time.time(), self.session_id))
@@ -69,8 +88,44 @@ class HoneyServer(asyncssh.SSHServer):
         return False  # force password so we capture it too
 
 async def handle_client(process: asyncssh.SSHServerProcess):
-    server: HoneyServer = process.get_extra_info("server")
+    server = _server_for_process(process)
+    if server is None:
+        try:
+            process.stderr.write("internal error\n")
+        except Exception:
+            pass
+        try:
+            process.exit(1)
+        except Exception:
+            pass
+        return
     st = ShellState(server.username, server.src_ip)
+    # exec (non-interactive: ssh user@host "cmd") — log + fake output, no shell loop
+    if process.command:
+        cmd = process.command.strip() if isinstance(process.command, str) else process.command.decode().strip()
+        try:
+            out, logged, _ = handle_line(st, cmd)
+            d = dbmod.db()
+            d.execute("INSERT INTO commands(session_id,ts,username,cwd,command,output_preview) VALUES(?,?,?,?,?,?)",
+                      (server.session_id, time.time(), st.username, st.cwd, (logged or cmd)[:2000], out[:500]))
+            d.execute("INSERT INTO tty_events(session_id,ts,kind,data) VALUES(?,?,?,?)",
+                      (server.session_id, time.time(), "exec", cmd[:2000]))
+            d.commit()
+            dbmod.log_jsonl({"type": "cmd", "id": server.session_id, "ip": server.src_ip,
+                             "user": st.username, "cmd": (logged or cmd)[:2000], "ts": time.time()})
+            process.stdout.write(out)
+            await process.stdout.drain()
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            try:
+                process.stderr.write(f"honey error: {e}\n")
+            except Exception:
+                pass
+        try:
+            process.exit(0)
+        except Exception:
+            pass
+        return
     process.stdout.write(initial_greeting(st))
     buf = ""
     try:
@@ -132,6 +187,4 @@ async def start_honeypot(host="0.0.0.0", port=2222):
         server_host_keys=[kp],
         server_version=BANNER,
         process_factory=handle_client,
-        password_auth_supported=True,
-        public_key_auth_supported=True,
     )
