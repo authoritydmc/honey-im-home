@@ -8,6 +8,19 @@ BANNER = "OpenSSH_9.6p1 Ubuntu-3ubuntu13.5"
 
 _SERVERS: dict[int, "HoneyServer"] = {}
 
+
+def _live(msg: dict):
+    """Best-effort fan-out to /api/live websocket subscribers."""
+    try:
+        from . import main as _main
+        for q in list(_main.live_queues):
+            try:
+                q.put_nowait(msg)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 def _server_for_process(process) -> "HoneyServer | None":
     try:
         conn = process.get_extra_info("connection")
@@ -40,8 +53,10 @@ class HoneyServer(asyncssh.SSHServer):
         d.execute("INSERT INTO sessions(id,started_at,src_ip,src_port,client_version) VALUES(?,?,?,?,?)",
                   (self.session_id, time.time(), self.src_ip, self.src_port, self.client_version))
         d.commit()
-        dbmod.log_jsonl({"type": "session.open", "id": self.session_id, "ip": self.src_ip,
-                         "port": self.src_port, "client": self.client_version, "ts": time.time()})
+        msg = {"type": "session.open", "id": self.session_id, "ip": self.src_ip,
+               "port": self.src_port, "client": self.client_version, "ts": time.time()}
+        dbmod.log_jsonl(msg)
+        _live(msg)
 
     def connection_lost(self, exc):
         try:
@@ -55,6 +70,7 @@ class HoneyServer(asyncssh.SSHServer):
         except Exception:
             pass
         dbmod.log_jsonl({"type": "session.close", "id": self.session_id, "ts": time.time()})
+        _live({"type": "session.close", "id": self.session_id, "ip": self.src_ip, "ts": time.time()})
 
     def password_auth_supported(self):
         return True
@@ -65,8 +81,10 @@ class HoneyServer(asyncssh.SSHServer):
         d.execute("INSERT INTO auth_attempts(session_id,ts,username,password,method,success) VALUES(?,?,?,?,?,?)",
                   (self.session_id, time.time(), username, password, "password", 1))
         d.commit()
-        dbmod.log_jsonl({"type": "auth", "id": self.session_id, "ip": self.src_ip,
-                         "user": username, "method": "password", "ts": time.time()})
+        msg = {"type": "auth", "id": self.session_id, "ip": self.src_ip,
+               "user": username, "method": "password", "ts": time.time()}
+        dbmod.log_jsonl(msg)
+        _live(msg)
         return True
 
     def public_key_auth_supported(self):
@@ -83,8 +101,10 @@ class HoneyServer(asyncssh.SSHServer):
         d.execute("INSERT INTO auth_attempts(session_id,ts,username,key_type,fingerprint,key_b64,method,success) VALUES(?,?,?,?,?,?,?,?)",
                   (self.session_id, time.time(), username, kt, str(fp), b64[:2000], "publickey", 0))
         d.commit()
-        dbmod.log_jsonl({"type": "auth", "id": self.session_id, "ip": self.src_ip,
-                         "user": username, "method": "publickey", "fp": str(fp)[:64], "ts": time.time()})
+        msg = {"type": "auth", "id": self.session_id, "ip": self.src_ip,
+               "user": username, "method": "publickey", "fp": str(fp)[:64], "ts": time.time()}
+        dbmod.log_jsonl(msg)
+        _live(msg)
         return False  # force password so we capture it too
 
 async def handle_client(process: asyncssh.SSHServerProcess):
@@ -111,8 +131,10 @@ async def handle_client(process: asyncssh.SSHServerProcess):
             d.execute("INSERT INTO tty_events(session_id,ts,kind,data) VALUES(?,?,?,?)",
                       (server.session_id, time.time(), "exec", cmd[:2000]))
             d.commit()
-            dbmod.log_jsonl({"type": "cmd", "id": server.session_id, "ip": server.src_ip,
-                             "user": st.username, "cmd": (logged or cmd)[:2000], "ts": time.time()})
+            msg = {"type": "cmd", "id": server.session_id, "ip": server.src_ip,
+                   "user": st.username, "cmd": (logged or cmd)[:2000], "ts": time.time()}
+            dbmod.log_jsonl(msg)
+            _live(msg)
             process.stdout.write(out)
             await process.stdout.drain()
         except Exception as e:
@@ -142,8 +164,10 @@ async def handle_client(process: asyncssh.SSHServerProcess):
                         d.execute("INSERT INTO commands(session_id,ts,username,cwd,command,output_preview) VALUES(?,?,?,?,?,?)",
                                   (server.session_id, time.time(), st.username, st.cwd, cmd[:2000], out[:500]))
                         d.commit()
-                        dbmod.log_jsonl({"type": "cmd", "id": server.session_id, "ip": server.src_ip,
-                                         "user": st.username, "cmd": cmd[:2000], "ts": time.time()})
+                        msg = {"type": "cmd", "id": server.session_id, "ip": server.src_ip,
+                               "user": st.username, "cmd": cmd[:2000], "ts": time.time()}
+                        dbmod.log_jsonl(msg)
+                        _live(msg)
                     try:
                         process.stdout.write(out)
                     except Exception:
@@ -160,7 +184,7 @@ async def handle_client(process: asyncssh.SSHServerProcess):
                         pass
                 elif ch == "\x03":
                     buf = ""
-                    process.stdout.write("^C" + f"\r\n{st.username}@prod-server:{st.cwd}$ ")
+                    process.stdout.write("^C" + f"\r\n{st.username}@honey:{st.cwd}$ ")
                 elif ch == "\x04":
                     process.stdout.write("\r\nlogout\r\n")
                     process.exit(0)

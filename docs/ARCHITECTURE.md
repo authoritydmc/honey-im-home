@@ -16,8 +16,8 @@ attacker ──ssh──▶ │ honeypot     │  asyncssh server, fake FS+shell
                          │ FastAPI :8078 /api/* + serves frontend/dist
                          ▼
                   ┌──────────────┐
-admin ──tailnet─▶ │ React UI     │  JWT login, mask toggle, replay player
-+SSO              │ /honey/      │
+admin ──tailnet─▶ │ React UI     │  SSO via edge, JWT direct, mask toggle
++SSO              │ /            │
                   └──────────────┘
 ```
 

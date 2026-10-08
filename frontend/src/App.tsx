@@ -1,94 +1,108 @@
 import { useEffect, useState } from 'react'
-import { api } from './lib/api'
+import { Activity, Eye, EyeOff, KeyRound, LayoutDashboard, ListOrdered, Radio, ShieldAlert, TerminalSquare } from 'lucide-react'
+import { api, type AuthStatus } from './lib/api'
+import { Overview } from './views/Overview'
+import { Live } from './views/Live'
+import { Attackers } from './views/Attackers'
+import { Sessions } from './views/Sessions'
+import { Commands, Credentials } from './views/Intel'
 
-type Stats = { sessions: number; auths: number; commands: number; ips: number;
-  top_ips: { src_ip: string; n: number }[]; top_users: { username: string; n: number }[] }
+type Tab = 'overview' | 'live' | 'attackers' | 'sessions' | 'creds' | 'cmds'
+
+const TABS: { id: Tab; label: string; icon: typeof Activity }[] = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'live', label: 'Live', icon: Radio },
+  { id: 'attackers', label: 'Attackers', icon: ShieldAlert },
+  { id: 'sessions', label: 'Sessions', icon: ListOrdered },
+  { id: 'creds', label: 'Credentials', icon: KeyRound },
+  { id: 'cmds', label: 'Commands', icon: TerminalSquare },
+]
 
 export default function App() {
-  const [token, setToken] = useState(localStorage.getItem('honey-token') || '')
+  const [token, setToken] = useState('')
+  const [proxyUser, setProxyUser] = useState<string | null>(null)
   const [pw, setPw] = useState('')
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [attackers, setAttackers] = useState<any[]>([])
+  const [tab, setTab] = useState<Tab>('overview')
   const [mask, setMask] = useState(true)
-  const show = (s: string) => (mask ? s.slice(0, 3) + '…' + s.slice(-2) : s)
+  const [booted, setBooted] = useState(false)
 
-  const [proxyAuth, setProxyAuth] = useState(false)
-  const load = async (t?: string) => {
-    setStats(await api('/api/stats', t))
-    setAttackers(await api('/api/attackers', t))
-  }
   useEffect(() => {
-    // Behind the auth proxy (Traefik ForwardAuth) the browser needs no
-    // token: the edge injects X-Forwarded-User. Token login is only for
-    // direct, no-proxy access.
+    // Behind the auth proxy the edge injects identity: no token needed.
+    // Token login is only for direct, no-proxy access.
     const boot = async () => {
+      try {
+        const a = await api<AuthStatus>('/api/auth')
+        if (a.mode === 'sso' && a.user) { setProxyUser(a.user); return }
+      } catch { /* not proxied, fall through */ }
       const t = localStorage.getItem('honey-token')
       if (t) {
-        try { setToken(t); await load(t); return }
+        try { setToken(t); await api('/api/stats', t); return }
         catch { localStorage.removeItem('honey-token'); setToken('') }
       }
-      try { await load(); setProxyAuth(true) }
-      catch { /* fall through to password login */ }
+      setBooted(true)
     }
-    boot()
+    boot().finally(() => setBooted(true))
   }, [])
 
+  const authed = proxyUser !== null || token !== ''
+  const effToken = token || undefined
+
   const login = async () => {
-    const r = await fetch('/api/auth/login', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) })
+    const r = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    })
     if (!r.ok) return alert('bad password')
-    const j = await r.json()
+    const j = await r.json() as { token: string }
     localStorage.setItem('honey-token', j.token)
     setToken(j.token)
   }
 
-  if (!token && !proxyAuth) return (
-    <div className="min-h-screen grid place-items-center bg-zinc-950 text-zinc-100">
-      <div className="p-8 rounded-2xl bg-zinc-900 w-96">
-        <h1 className="text-xl font-bold">🍯 Honey I'm Home — admin</h1>
-        <input type="password" value={pw} onChange={e => setPw(e.target.value)}
-          placeholder="admin password" className="mt-4 w-full p-2 rounded bg-zinc-800" />
-        <button onClick={login} className="mt-3 w-full p-2 rounded bg-amber-500 text-black font-bold">Sign in</button>
+  if (!authed && booted) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-zinc-950 text-zinc-100 p-4">
+        <div className="p-8 rounded-2xl bg-zinc-900 border border-zinc-800 w-96 max-w-full">
+          <h1 className="text-xl font-bold">🍯 Honey I'm Home</h1>
+          <p className="text-xs text-zinc-500 mt-1">Sign in — not needed behind SSO</p>
+          <input type="password" value={pw} onChange={e => setPw(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') login() }}
+            placeholder="admin password" className="mt-4 w-full p-2 rounded bg-zinc-800 outline-none focus:ring-1 focus:ring-amber-500" />
+          <button onClick={login} className="mt-3 w-full p-2 rounded bg-amber-500 text-black font-bold">Sign in</button>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
+  if (!authed) return <div className="min-h-screen grid place-items-center text-sm text-zinc-500">Loading trap intel…</div>
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <header className="flex items-center gap-3">
-        <h1 className="text-xl font-bold">🍯 Honey I'm Home</h1>
-        <span className="text-xs text-zinc-400">Ubuntu SSH trap + intel{proxyAuth ? ' · SSO' : ''}</span>
-        <button onClick={() => setMask(!mask)} className="ml-auto text-xs px-3 py-1 rounded bg-zinc-800">
-          {mask ? 'Unmask' : 'Mask'}
-        </button>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+          <h1 className="font-bold">🍯 Honey I'm Home</h1>
+          {proxyUser
+            ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">SSO · {proxyUser}</span>
+            : <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">token</span>}
+          <button onClick={() => setMask(!mask)} className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700">
+            {mask ? <EyeOff size={14} /> : <Eye size={14} />}{mask ? 'Masked' : 'Visible'}
+          </button>
+        </div>
+        <nav className="max-w-6xl mx-auto px-4 pb-2 flex gap-1 overflow-x-auto">
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg whitespace-nowrap ${tab === t.id ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}>
+              <t.icon size={15} />{t.label}
+            </button>
+          ))}
+        </nav>
       </header>
-      <div className="grid grid-cols-4 gap-3 mt-4">
-        {[['Sessions', stats?.sessions], ['Auths', stats?.auths], ['Commands', stats?.commands], ['IPs', stats?.ips]].map(([k, v]) => (
-          <div key={k} className="p-4 rounded-2xl bg-zinc-900"><div className="text-xs text-zinc-400">{k}</div>
-            <div className="text-2xl font-bold">{v ?? '…'}</div></div>
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-3 mt-4">
-        <div className="p-4 rounded-2xl bg-zinc-900">
-          <h2 className="font-bold text-sm">Top IPs</h2>
-          {stats?.top_ips.map(x => <div key={x.src_ip} className="flex justify-between text-sm py-1">
-            <span>{show(x.src_ip)}</span><span>{x.n}</span></div>)}
-        </div>
-        <div className="p-4 rounded-2xl bg-zinc-900">
-          <h2 className="font-bold text-sm">Top users tried</h2>
-          {stats?.top_users.map(x => <div key={x.username} className="flex justify-between text-sm py-1">
-            <span>{show(x.username)}</span><span>{x.n}</span></div>)}
-        </div>
-      </div>
-      <div className="p-4 rounded-2xl bg-zinc-900 mt-4">
-        <h2 className="font-bold text-sm">Attackers by IP</h2>
-        <table className="w-full text-sm mt-2">
-          <thead className="text-zinc-400"><tr><th className="text-left">IP</th><th>Sessions</th><th>Attempts</th><th>Users</th></tr></thead>
-          <tbody>{attackers.map(a => <tr key={a.ip} className="border-t border-zinc-800">
-            <td>{show(a.ip)}</td><td>{a.sessions}</td><td>{a.attempts}</td>
-            <td className="truncate max-w-64">{a.users}</td></tr>)}</tbody>
-        </table>
-      </div>
+      <main className="max-w-6xl mx-auto px-4 py-4">
+        {tab === 'overview' && <Overview token={effToken} mask={mask} />}
+        {tab === 'live' && <Live mask={mask} />}
+        {tab === 'attackers' && <Attackers token={effToken} mask={mask} />}
+        {tab === 'sessions' && <Sessions token={effToken} mask={mask} />}
+        {tab === 'creds' && <Credentials token={effToken} mask={mask} />}
+        {tab === 'cmds' && <Commands token={effToken} mask={mask} />}
+      </main>
     </div>
   )
 }

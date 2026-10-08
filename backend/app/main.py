@@ -26,11 +26,26 @@ live_queues: set[asyncio.Queue] = set()
 def make_token(role="admin"):
     return jwt.encode({"sub": role, "exp": time.time() + 12 * 3600}, SECRET, algorithm="HS256")
 
+PROXY_USER_HEADERS = ("X-Forwarded-User", "X-Forwarded-Email", "Remote-User",
+                        "Remote-Email", "Cf-Access-Authenticated-User-Email")
+
+
+def proxy_user(request: Request):
+    if os.environ.get("TRUST_PROXY_AUTH") != "1":
+        return None
+    for h in PROXY_USER_HEADERS:
+        v = (request.headers.get(h) or "").strip()
+        if v:
+            return v
+    return None
+
+
 def require_auth(request: Request, cred: HTTPAuthorizationCredentials = Depends(security)):
-    # Traefik+Authentik SSO: trust X-Forwarded-User, but that header only
-    # arrives via the forwardAuth middleware (API binds 127.0.0.1, so direct
-    # callers cannot spoof it from outside the box).
-    if os.environ.get("TRUST_PROXY_AUTH") == "1" and request.headers.get("X-Forwarded-User"):
+    # Edge SSO (Traefik ForwardAuth / Authelia / Cloudflare Access): trust the
+    # identity header the edge injects. The API binds 127.0.0.1 behind the
+    # edge, so direct callers cannot spoof it from outside the box.
+    # Without the edge, a JWT from /api/auth/login is required.
+    if proxy_user(request):
         return "admin"
     if not cred:
         raise HTTPException(401, "login required")
@@ -48,6 +63,14 @@ async def _startup():
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "ts": time.time()}
+
+@app.get("/api/auth")
+def auth_status(request: Request):
+    u = proxy_user(request)
+    if u:
+        return {"mode": "sso", "login": "sso", "user": u}
+    return {"mode": "token", "login": "password", "user": None}
+
 
 @app.post("/api/auth/login")
 def login(body: dict):
@@ -79,16 +102,42 @@ def sessions(ip: str = "", limit: int = 50, _=Depends(require_auth)):
     return [dict(r) for r in d.execute(q, (ip, ip, limit))]
 
 @app.get("/api/credentials")
-def creds(limit: int = 100, _=Depends(require_auth)):
+def creds(limit: int = 100, session_id: str = "", ip: str = "", _=Depends(require_auth)):
     d = dbmod.db()
-    return [dict(r) for r in d.execute(
-        "SELECT * FROM auth_attempts ORDER BY ts DESC LIMIT ?", (limit,))]
+    if ip:
+        rows = d.execute(
+            """SELECT a.*, s.src_ip AS ip FROM auth_attempts a JOIN sessions s
+               ON s.id=a.session_id WHERE s.src_ip=? ORDER BY a.ts DESC LIMIT ?""",
+            (ip, limit))
+    elif session_id:
+        rows = d.execute(
+            """SELECT a.*, s.src_ip AS ip FROM auth_attempts a JOIN sessions s
+               ON s.id=a.session_id WHERE a.session_id=? ORDER BY a.ts LIMIT ?""",
+            (session_id, limit))
+    else:
+        rows = d.execute(
+            """SELECT a.*, s.src_ip AS ip FROM auth_attempts a LEFT JOIN sessions s
+               ON s.id=a.session_id ORDER BY a.ts DESC LIMIT ?""", (limit,))
+    return [dict(r) for r in rows]
 
 @app.get("/api/commands")
-def cmds(limit: int = 100, _=Depends(require_auth)):
+def cmds(limit: int = 100, session_id: str = "", ip: str = "", _=Depends(require_auth)):
     d = dbmod.db()
-    return [dict(r) for r in d.execute(
-        "SELECT * FROM commands ORDER BY ts DESC LIMIT ?", (limit,))]
+    if ip:
+        rows = d.execute(
+            """SELECT c.*, s.src_ip AS ip FROM commands c JOIN sessions s
+               ON s.id=c.session_id WHERE s.src_ip=? ORDER BY c.ts DESC LIMIT ?""",
+            (ip, limit))
+    elif session_id:
+        rows = d.execute(
+            """SELECT c.*, s.src_ip AS ip FROM commands c JOIN sessions s
+               ON s.id=c.session_id WHERE c.session_id=? ORDER BY c.ts LIMIT ?""",
+            (session_id, limit))
+    else:
+        rows = d.execute(
+            """SELECT c.*, s.src_ip AS ip FROM commands c LEFT JOIN sessions s
+               ON s.id=c.session_id ORDER BY c.ts DESC LIMIT ?""", (limit,))
+    return [dict(r) for r in rows]
 
 @app.get("/api/attackers")
 def attackers(_=Depends(require_auth)):
@@ -114,10 +163,10 @@ async def live(ws: WebSocket):
     finally:
         live_queues.discard(q)
 
-# serve React build if present
+# serve React build if present (root path; API routes take precedence)
 DIST = os.path.join(os.path.dirname(__file__), "..", "static")
 if os.path.isdir(DIST):
-    app.mount("/honey", StaticFiles(directory=DIST, html=True), name="ui")
+    app.mount("/", StaticFiles(directory=DIST, html=True), name="ui")
 
 if __name__ == "__main__":
     import uvicorn

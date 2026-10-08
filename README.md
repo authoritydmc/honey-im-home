@@ -1,6 +1,6 @@
 # Honey I'm Home 🍯🏠 — Ubuntu-style SSH Honeypot + SOC Dashboard
 
-Fake Ubuntu SSH server with full emulation + keylogging, backed by FastAPI + SQLite and a React admin UI. For security research on systems you own.
+Fake Ubuntu SSH server with full emulation + keylogging, backed by FastAPI + SQLite and a React SOC dashboard. For security research on systems you own.
 
 > ⚠️ Legal: deploy only on hosts you own / are authorized to test. Logs attacker IPs, credentials, keystrokes, commands, SSH client fingerprints. No reference to any upstream project — original build.
 
@@ -52,7 +52,7 @@ Banner `SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.5`, fake FS (`/home/ubuntu`, `/et
 
 ## Frontend
 
-React 19 + Vite + Tailwind. Pages: Overview (totals, 48h chart, top IPs), Live (websocket tail), Attackers (by IP: geo/ASN, users tried, sessions, replay button), Session replay (xterm-style player), Credentials/Commands tables. Header mask toggle hides sensitive values. Base path `/honey/`.
+React 19 + Vite + Tailwind v4, lucide icons, recharts. Pages: Overview (totals, 48h chart, top IPs/users), Live (websocket tail), Attackers (per-IP timeline drawer), Sessions (per-session event timeline), Credentials/Commands tables. Served at `/` (no subpath). Header mask toggle hides sensitive values. Behind the auth proxy no login is needed (SSO badge); direct access uses the admin password.
 
 ## Layout
 

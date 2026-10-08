@@ -28,7 +28,7 @@ FAKE_OS_RELEASE = (
     'PRETTY_NAME="Ubuntu 24.04.1 LTS"\r\nVERSION_ID="24.04"\r\n'
 )
 
-FAKE_HOSTS = "127.0.0.1 localhost\r\n127.0.1.1 prod-server\r\n"
+FAKE_HOSTS = "127.0.0.1 localhost\r\n127.0.1.1 honey\r\n"
 
 FAKE_CONFIG_PHP = (
     "<?php\r\n// app config -- do not commit\r\n"
@@ -131,7 +131,7 @@ LAST_SHORT = (
 W_SHORT = " 11:02:14 up 34 days,  2:11,  1 user,  load average: 0.08, 0.03, 0.01\r\nUSER     TTY      LOGIN@   IDLE   WHAT\r\nubuntu   pts/0     11:02    0.00s  -bash\r\n"
 
 SYSTEMCTL_STATUS = (
-    "● prod-server\r\n"
+    "● honey\r\n"
     "    State: running\r\n"
     "     Jobs: 0 queued\r\n"
     "   Failed: 0 units\r\n"
@@ -174,7 +174,7 @@ class ShellState:
 
 
 def prompt(st: ShellState) -> str:
-    return f"\r\n{st.username}@prod-server:{st.cwd}$ "
+    return f"\r\n{st.username}@honey:{st.cwd}$ "
 
 
 def initial_greeting(st: ShellState) -> str:
@@ -187,7 +187,7 @@ def _expand(st: ShellState, text: str) -> str:
     return (text.replace("$USER", st.username).replace("${USER}", st.username)
             .replace("$HOME", home).replace("${HOME}", home)
             .replace("$PWD", st.cwd).replace("~", home)
-            .replace("$HOSTNAME", "prod-server").replace("${HOSTNAME}", "prod-server"))
+            .replace("$HOSTNAME", "honey").replace("${HOSTNAME}", "honey"))
 
 
 def handle_line(st: ShellState, line: str):
@@ -242,10 +242,10 @@ def handle_line(st: ShellState, line: str):
     if cmd == "hostname":
         if args and args[0] == "-I":
             return done("10.0.2.15 172.17.0.2")
-        return done("prod-server")
+        return done("honey")
     if cmd == "uname":
         if "-a" in args or not args:
-            return done("Linux prod-server 6.8.0-41-generic #41-Ubuntu SMP x86_64 GNU/Linux")
+            return done("Linux honey 6.8.0-41-generic #41-Ubuntu SMP x86_64 GNU/Linux")
         if "-r" in args:
             return done("6.8.0-41-generic")
         if "-m" in args or "-p" in args:
@@ -300,7 +300,7 @@ def handle_line(st: ShellState, line: str):
         if "os-release" in raw:
             return done(FAKE_OS_RELEASE.rstrip("\r\n"))
         if "hostname" in raw and "hosts" not in raw:
-            return done("prod-server")
+            return done("honey")
         if "hosts" in raw:
             return done(FAKE_HOSTS.rstrip("\r\n"))
         if "cpuinfo" in raw:
