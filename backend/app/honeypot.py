@@ -4,7 +4,7 @@ import asyncssh
 from . import db as dbmod
 from .shell import ShellState, handle_line, initial_greeting
 
-BANNER = "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.5"
+BANNER = "OpenSSH_9.6p1 Ubuntu-3ubuntu13.5"
 
 _SERVERS: dict[int, "HoneyServer"] = {}
 
