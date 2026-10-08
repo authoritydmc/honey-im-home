@@ -12,11 +12,26 @@ export default function App() {
   const [mask, setMask] = useState(true)
   const show = (s: string) => (mask ? s.slice(0, 3) + '…' + s.slice(-2) : s)
 
-  const load = async (t: string) => {
+  const [proxyAuth, setProxyAuth] = useState(false)
+  const load = async (t?: string) => {
     setStats(await api('/api/stats', t))
     setAttackers(await api('/api/attackers', t))
   }
-  useEffect(() => { if (token) load(token).catch(() => setToken('')) }, [token])
+  useEffect(() => {
+    // Behind the auth proxy (Traefik ForwardAuth) the browser needs no
+    // token: the edge injects X-Forwarded-User. Token login is only for
+    // direct, no-proxy access.
+    const boot = async () => {
+      const t = localStorage.getItem('honey-token')
+      if (t) {
+        try { setToken(t); await load(t); return }
+        catch { localStorage.removeItem('honey-token'); setToken('') }
+      }
+      try { await load(); setProxyAuth(true) }
+      catch { /* fall through to password login */ }
+    }
+    boot()
+  }, [])
 
   const login = async () => {
     const r = await fetch('/api/auth/login', { method: 'POST',
@@ -27,7 +42,7 @@ export default function App() {
     setToken(j.token)
   }
 
-  if (!token) return (
+  if (!token && !proxyAuth) return (
     <div className="min-h-screen grid place-items-center bg-zinc-950 text-zinc-100">
       <div className="p-8 rounded-2xl bg-zinc-900 w-96">
         <h1 className="text-xl font-bold">🍯 Honey I'm Home — admin</h1>
@@ -42,7 +57,7 @@ export default function App() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
       <header className="flex items-center gap-3">
         <h1 className="text-xl font-bold">🍯 Honey I'm Home</h1>
-        <span className="text-xs text-zinc-400">Ubuntu SSH trap + intel</span>
+        <span className="text-xs text-zinc-400">Ubuntu SSH trap + intel{proxyAuth ? ' · SSO' : ''}</span>
         <button onClick={() => setMask(!mask)} className="ml-auto text-xs px-3 py-1 rounded bg-zinc-800">
           {mask ? 'Unmask' : 'Mask'}
         </button>
