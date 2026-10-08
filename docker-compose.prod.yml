@@ -5,10 +5,11 @@ services:
     restart: unless-stopped
     mem_limit: 512m
     mem_reservation: 128m
-    # PROD: honeypot on host :2222 (reached via NAT REDIRECT from :22).
+    # PROD: honeypot reached via NAT DNAT from public :22 straight to its
+    # stable container IP (preserves attacker source IP; userland-proxy would mask it).
     # Host sshd + ssh.socket are NEVER touched. API on localhost only.
     ports:
-      - "2222:2222"       # trap (public :22 DNATs here; direct :2222 also trap)
+      - "2222:2222"       # direct :2222 also trap (source shown as gateway; use :22 for real intel)
       - "127.0.0.1:8078:8078"  # API/UI localhost only, Traefik fronts it
     env_file: .env
     environment:
@@ -20,7 +21,8 @@ services:
     volumes:
       - honey_data:/srv/data
     networks:
-      - coolify
+      coolify:
+        ipv4_address: 10.0.2.50
     security_opt:
       - no-new-privileges:true
     cap_drop:
