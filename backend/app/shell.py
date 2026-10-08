@@ -18,6 +18,11 @@ FAKE_FILES = {
 
 FAKE_PASSWD = "root:x:0:0:root:/root:/bin/bash\r\nubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash\r\n"
 
+FAKE_SHADOW = (
+    "root:!:20156:0:99999:7:::\r\n"
+    "ubuntu:!:20156:0:99999:7:::\r\n"
+)
+
 FAKE_OS_RELEASE = (
     'NAME="Ubuntu"\r\nVERSION="24.04.1 LTS (Noble Numbat)"\r\nID=ubuntu\r\n'
     'PRETTY_NAME="Ubuntu 24.04.1 LTS"\r\nVERSION_ID="24.04"\r\n'
@@ -181,7 +186,8 @@ def _expand(st: ShellState, text: str) -> str:
     home = f"/home/{st.username}"
     return (text.replace("$USER", st.username).replace("${USER}", st.username)
             .replace("$HOME", home).replace("${HOME}", home)
-            .replace("$PWD", st.cwd).replace("~", home))
+            .replace("$PWD", st.cwd).replace("~", home)
+            .replace("$HOSTNAME", "prod-server").replace("${HOSTNAME}", "prod-server"))
 
 
 def handle_line(st: ShellState, line: str):
@@ -203,6 +209,13 @@ def handle_line(st: ShellState, line: str):
         return "\r\n" + body + "\r\n" + prompt(st), secret if secret is not None else raw, kind
 
     if cmd == "sudo":
+        if st.username == "root":
+            # root needs no password: run the remainder in place.
+            rest = raw[4:].strip()
+            if not rest or rest.split()[0] == "sudo":
+                return done("")
+            out2, _, _ = handle_line(st, rest)
+            return out2, raw, None
         st.awaiting_sudo_pass = True
         st.pending_sudo_cmd = raw
         return f"\r\n[sudo] password for {st.username}: ", raw, None
@@ -221,6 +234,8 @@ def handle_line(st: ShellState, line: str):
     if cmd == "whoami":
         return done(st.username)
     if cmd in ("id", "groups"):
+        if st.username == "root":
+            return done("uid=0(root) gid=0(root) groups=0(root)")
         return done(f"uid=1000({st.username}) gid=1000({st.username}) groups=1000({st.username})")
     if cmd == "pwd":
         return done(st.cwd)
@@ -277,6 +292,8 @@ def handle_line(st: ShellState, line: str):
     if cmd == "cat":
         target = args[-1] if args else ""
         if "shadow" in raw or "gshadow" in raw:
+            if st.username == "root":
+                return done(FAKE_SHADOW.rstrip("\r\n"))
             return done(f"cat: {target or '/etc/shadow'}: Permission denied")
         if "passwd" in raw:
             return done(FAKE_PASSWD.replace("\n", "\r\n").rstrip("\r\n"))
@@ -336,7 +353,7 @@ def handle_line(st: ShellState, line: str):
     if cmd == "env":
         return done(f"USER={st.username}\r\nHOME=/home/{st.username}\r\nSHELL=/bin/bash\r\nPWD={st.cwd}\r\nLANG=C.UTF-8")
     if cmd == "crontab":
-        return done("no crontab for ubuntu")
+        return done(f"no crontab for {st.username}")
     if cmd == "systemctl":
         sub = args[0] if args else "status"
         if sub == "status" or not args:
