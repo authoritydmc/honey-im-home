@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
-import { api, fmtAgo, maskVal, type Attempt, type Attacker, type Command, type Session } from '../lib/api'
+import { api, fmtAgo, fmtTime, maskVal, type Attempt, type Attacker, type Command, type Session } from '../lib/api'
 import { Card, Drawer } from '../components/Drawer'
-import { buildTimeline, SessionMeta, Timeline } from '../components/Timeline'
+import { SessionMeta, Timeline } from '../components/Timeline'
 
 export function Attackers({ token, mask }: { token?: string; mask: boolean }) {
   const [rows, setRows] = useState<Attacker[]>([])

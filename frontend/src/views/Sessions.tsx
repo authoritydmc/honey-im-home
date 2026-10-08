@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { History } from 'lucide-react'
-import { api, fmtAgo, maskVal, type Attempt, type Command, type Session } from '../lib/api'
-import { Card, Drawer, Th } from '../components/Drawer'
+import { api, fmtAgo, fmtTime, maskVal, type Attempt, type Command, type Session } from '../lib/api'
+import { Card, Drawer } from '../components/Drawer'
 import { buildTimeline, SessionMeta, Timeline } from '../components/Timeline'
 
 export function Sessions({ token, mask }: { token?: string; mask: boolean }) {
