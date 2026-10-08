@@ -1,6 +1,6 @@
 """FastAPI: auth + stats + sessions/attackers + live WS + serves React dist."""
 import asyncio, os, time
-from fastapi import FastAPI, Depends, HTTPException, WebSocket
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -26,9 +26,11 @@ live_queues: set[asyncio.Queue] = set()
 def make_token(role="admin"):
     return jwt.encode({"sub": role, "exp": time.time() + 12 * 3600}, SECRET, algorithm="HS256")
 
-def require_auth(cred: HTTPAuthorizationCredentials = Depends(security)):
-    # allow Traefik ForwardAuth header passthrough
-    if os.environ.get("TRUST_PROXY_AUTH") == "1":
+def require_auth(request: Request, cred: HTTPAuthorizationCredentials = Depends(security)):
+    # Traefik+Authentik SSO: trust X-Forwarded-User, but that header only
+    # arrives via the forwardAuth middleware (API binds 127.0.0.1, so direct
+    # callers cannot spoof it from outside the box).
+    if os.environ.get("TRUST_PROXY_AUTH") == "1" and request.headers.get("X-Forwarded-User"):
         return "admin"
     if not cred:
         raise HTTPException(401, "login required")
