@@ -1,0 +1,35 @@
+# server2 / small hosts: same trap, IPv4-only (no v6 docker subnet here).
+# IPv4 is static so the host DNAT rule stays valid. v6 :22 falls back to
+# REDIRECT :22->:2222 (source shows as gateway for v6 attackers only).
+services:
+  honey:
+    build: .
+    image: ghcr.io/authoritydmc/honey-im-home:latest
+    restart: unless-stopped
+    mem_limit: 384m
+    mem_reservation: 96m
+    ports:
+      - "2222:2222"
+      - "127.0.0.1:8078:8078"
+    env_file: .env
+    environment:
+      DATA_DIR: /srv/data
+      HONEYPOT_HOST: 0.0.0.0
+      HONEYPOT_PORT: 2222
+      API_PORT: 8078
+      TRUST_PROXY_AUTH: 1
+    volumes:
+      - honey_data:/srv/data
+    networks:
+      coolify:
+        ipv4_address: ${HONEY_IPV4:-172.19.0.50}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: false
+networks:
+  coolify:
+    external: true
+volumes:
+  honey_data:
