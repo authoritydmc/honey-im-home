@@ -1,0 +1,21 @@
+services:
+  honey:
+    build: .
+    image: ghcr.io/authoritydmc/honey-im-home:latest
+    restart: unless-stopped
+    ports:
+      - "2222:2222"
+      - "8078:8078"
+    env_file: .env
+    environment:
+      DATA_DIR: /srv/data
+    volumes:
+      - honey_data:/srv/data
+    # traefik example (HTTP only, keep 8078 on tailnet + SSO):
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.honey.rule=Host(`honey.example.com`)"
+    #   - "traefik.http.routers.honey.entrypoints=https"
+    #   - "traefik.http.services.honey.loadbalancer.server.port=8078"
+volumes:
+  honey_data:
