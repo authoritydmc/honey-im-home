@@ -1,30 +1,38 @@
 #!/bin/bash
-# Deploy honey-im-home on an Oracle host (Coolify network + Traefik + UFW + OCI).
-# Run from repo root on the server. Idempotent.
+# Deploy honey-im-home on an Oracle host (Coolify network + Traefik + UFW NAT + OCI).
+# Host sshd is NEVER moved. Run from repo root on the server. Idempotent.
 set -euo pipefail
-REAL_PORT=2244
 cd "$(dirname "$0")/.."
-[ -f .env ] || { echo "copy .env.example to .env first"; exit 1; }
-# 1. UFW baseline (run before sshd finalize so you never lock out)
+[ -f .env ] || { echo "copy .env.example to .env first (ADMIN_PASSWORD, SECRET_KEY)"; exit 1; }
+# 1. UFW baseline (NAT REDIRECT does the steering; sshd untouched)
 sudo ufw --force enable || true
-sudo ufw allow $REAL_PORT/tcp comment 'Real SSH after honey swap' || true
-sudo ufw allow 22/tcp comment 'Honeypot SSH trap' || true
+sudo ufw allow 2244/tcp comment 'Real SSH via NAT to 22' || true
+sudo ufw allow 22/tcp comment 'SSH (trap from net, real from localhost)' || true
+sudo ufw allow 2222/tcp comment 'Honeypot trap (NAT from 22)' || true
 sudo ufw allow 80/tcp comment 'HTTP Traefik' || true
 sudo ufw allow 443/tcp comment 'HTTPS Traefik' || true
 sudo ufw allow 443/udp comment 'HTTP3 QUIC' || true
 sudo ufw allow 41641/udp comment 'Tailscale' || true
 # API 8078 stays localhost-only in prod compose; no UFW open needed.
-# If you need direct tailnet access (no Traefik), uncomment:
+# Optional tailnet-only direct UI:
 # sudo ufw allow in on tailscale0 to any port 8078 proto tcp comment 'Honey UI via tailnet' || true
-sudo ufw status verbose
-# 2. Coolify external network for Traefik discovery
+# 2. NAT steering :22 -> :2222 (trap), :2244 -> :22 (real). Fail-open, rollback with --rollback.
+./scripts/trap-nat.sh
+# 3. Coolify external network for Traefik discovery
 docker network inspect coolify >/dev/null 2>&1 || docker network create coolify
-# 3. Build + start (honeypot binds host :22, so run scripts/swap-ssh-port.sh --finalize FIRST)
+# 4. Build + start
 docker compose -f docker-compose.prod.yml up -d --build
-sleep 5
+sleep 8
 curl -fsS http://127.0.0.1:8078/healthz
-# 4. Honeypot smoke: password is always accepted, key is logged+rejected
-(sshpass -p trap123 ssh -p 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@127.0.0.1 "whoami; exit" 2>&1 | head -5) || true
-echo "--- recent creds (needs JWT) ---"
-echo "login: curl -s -X POST 127.0.0.1:8078/api/auth/login -H 'Content-Type: application/json' -d '{\"password\":\"\$ADMIN_PASSWORD\"}'"
+echo
+echo "--- trap self-test (localhost :2222 hits honey directly; localhost :22 stays real by design) ---"
+python3 - <<'PY'
+import asyncio, asyncssh
+async def t():
+    async with asyncssh.connect('127.0.0.1', port=2222, username='root', password='smoke-test', known_hosts=None) as c:
+        r = await c.run('whoami')
+        print("trap whoami ->", repr(r.stdout[:80]))
+asyncio.run(t())
+PY
+echo "--- from OUTSIDE this box verify: ssh -p 22 (trap) vs ssh -p 2244 (real) ---"
 docker ps --format '{{.Names}} {{.Ports}} {{.Status}}' | grep -i honey

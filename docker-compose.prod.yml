@@ -3,9 +3,12 @@ services:
     build: .
     image: ghcr.io/authoritydmc/honey-im-home:latest
     restart: unless-stopped
-    # PROD: honeypot owns host port 22, API only on tailnet/localhost
+    mem_limit: 512m
+    mem_reservation: 128m
+    # PROD: honeypot on host :2222 (reached via NAT REDIRECT from :22).
+    # Host sshd + ssh.socket are NEVER touched. API on localhost only.
     ports:
-      - "22:2222"       # attackers -> honeypot
+      - "2222:2222"       # trap (public :22 DNATs here; direct :2222 also trap)
       - "127.0.0.1:8078:8078"  # API/UI localhost only, Traefik fronts it
     env_file: .env
     environment:
@@ -18,6 +21,11 @@ services:
       - honey_data:/srv/data
     networks:
       - coolify
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: false  # sqlite needs writes in /srv/data (volume)
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.honey-https.rule=Host(`honey.rajlabs.in`)"
