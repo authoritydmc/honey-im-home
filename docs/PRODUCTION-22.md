@@ -1,21 +1,26 @@
 # Production: honeypot owns public :22, real SSH on :2244 — without touching sshd
 
 Design change (2026-10-08): host `sshd` / `ssh.socket` are NEVER modified.
-Steering is done in UFW NAT (`/etc/ufw/before.rules`), which is fail-open:
-if NAT is absent, `:22` is the real sshd exactly as before. Rollback is 3 lines.
+Steering is two direct-iptables NAT rules (fail-open: absent => `:22` is real
+sshd). UFW files carry filter rules only — `ufw reload` re-applies file NAT
+without flushing and would duplicate rules, so NAT is managed by
+`scripts/trap-nat.sh` + `examples/systemd-honey-nat.service` instead.
 
-## Traffic map after `./scripts/trap-nat.sh`
+## Traffic map (`trap-nat.sh` + `honey-nat.service`)
 
 ```
-internet :22   ──PREROUTING REDIRECT──▶ host :2222 ──▶ honey docker (asyncssh trap)
-internet :2244 ──PREROUTING REDIRECT──▶ host :22   ──▶ real sshd (key-only, fail2ban)
-tailnet  :22   ──same PREROUTING──────▶ trap            (use :2244 on tailnet for real)
-localhost :22  ──OUTPUT chain, no NAT─▶ real sshd       (by design; test trap via :2222 locally)
+internet :22   ──nat DNAT──▶ 10.0.2.50:2222 honey docker (real source IP kept)
+internet :2244 ──nat REDIRECT─▶ host :22   ──▶ real sshd (key-only, fail2ban)
+tailnet  :22   ──same DNAT───▶ trap            (use :2244 on tailnet for real)
+localhost :22  ──OUTPUT chain, no NAT─▶ real sshd       (test trap via :2222 locally)
 internet :80/443 ─▶ coolify-proxy Traefik ─▶ honey:8078 (authentik-auth SSO)
 ```
 
-Attacker source IPs are preserved through REDIRECT (DNAT, not proxy), so
-fail2ban-style intel, geo, and per-IP timelines in the UI stay accurate.
+Why DNAT and not REDIRECT: REDIRECT rewrites to host-local `:2222`, where the
+docker userland proxy accepts and re-originates the flow, masking every
+attacker as the bridge gateway (`10.0.2.1`). DNAT to the honey container's
+stable IP (`10.0.2.50`, `fdc9:f46e:be08::50`) preserves the true source IP
+(verified live: internet logins logged with real public IP).
 The honeypot container is fully isolated: no host network, `cap_drop: ALL`,
 `no-new-privileges`, only `/srv/data` volume + published `2222`/`127.0.0.1:8078`.
 It can never reach the internal network: it makes zero egress connections

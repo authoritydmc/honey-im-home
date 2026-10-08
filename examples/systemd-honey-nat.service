@@ -1,0 +1,18 @@
+[Unit]
+Description=Honey trap NAT (DNAT :22 to honey, REDIRECT :2244 to sshd)
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=HONEY_IP=10.0.2.50
+Environment=HONEY_PORT=2222
+Environment=HONEY_IP6=fdc9:f46e:be08::50
+ExecStart=/bin/bash -c 'iptables -t nat -C PREROUTING -p tcp --dport 22 -m comment --comment "honey-trap" -j DNAT --to-destination ${HONEY_IP}:${HONEY_PORT} || iptables -t nat -I PREROUTING 1 -p tcp --dport 22 -m comment --comment "honey-trap" -j DNAT --to-destination ${HONEY_IP}:${HONEY_PORT}'
+ExecStart=/bin/bash -c 'iptables -t nat -C PREROUTING -p tcp --dport 2244 -m comment --comment "honey-realssh" -j REDIRECT --to-port 22 || iptables -t nat -I PREROUTING 1 -p tcp --dport 2244 -m comment --comment "honey-realssh" -j REDIRECT --to-port 22'
+ExecStart=/bin/bash -c 'ip6tables -t nat -C PREROUTING -p tcp --dport 22 -m comment --comment "honey-trap" -j DNAT --to-destination [${HONEY_IP6}]:${HONEY_PORT} || ip6tables -t nat -I PREROUTING 1 -p tcp --dport 22 -m comment --comment "honey-trap" -j DNAT --to-destination [${HONEY_IP6}]:${HONEY_PORT}'
+ExecStart=/bin/bash -c 'ip6tables -t nat -C PREROUTING -p tcp --dport 2244 -m comment --comment "honey-realssh" -j REDIRECT --to-port 22 || ip6tables -t nat -I PREROUTING 1 -p tcp --dport 2244 -m comment --comment "honey-realssh" -j REDIRECT --to-port 22'
+
+[Install]
+WantedBy=multi-user.target
