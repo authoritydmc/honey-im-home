@@ -23,11 +23,6 @@ FAKE_SHADOW = (
     "ubuntu:!:20156:0:99999:7:::\r\n"
 )
 
-FAKE_OS_RELEASE = (
-    'NAME="Ubuntu"\r\nVERSION="24.04.1 LTS (Noble Numbat)"\r\nID=ubuntu\r\n'
-    'PRETTY_NAME="Ubuntu 24.04.1 LTS"\r\nVERSION_ID="24.04"\r\n'
-)
-
 FAKE_HOSTS = "127.0.0.1 localhost\r\n127.0.1.1 honey\r\n"
 
 FAKE_CONFIG_PHP = (
@@ -44,17 +39,94 @@ FAKE_BASHRC = (
     "alias ll='ls -alF'\r\n"
 )
 
-FAKE_CPUINFO = (
-    "processor\t: 0\r\nvendor_id\t: GenuineIntel\r\n"
-    "model name\t: Intel(R) Xeon(R) Platinum 8488C\r\n"
-    "cpu MHz\t\t: 2992.969\r\nprocessor\t: 1\r\n"
-    "model name\t: Intel(R) Xeon(R) Platinum 8488C\r\n"
+# --- Juicy-but-plausible cloud GPU box: 32 vCPU, 96GB RAM, 1x A100 40GB ---
+# Values below are LIVE: uptime ticks from a fixed boot 36 days ago, load and
+# GPU telemetry drift with time, so repeated probes look like a real system.
+import time as _time
+import random as _random
+
+NCPU = 32
+MEM_MB = 96483  # ~96GB as reported by free -m
+BOOT_TS = _time.time() - 36 * 86400  # booted 36 days ago, keeps ticking
+
+
+def _uptime_sec():
+    return max(0, _time.time() - BOOT_TS)
+
+
+def _tick(seed_key: str, lo: float, hi: float, n: int = 1):
+    """Slowly-drifting pseudo telemetry, stable within a minute."""
+    bucket = int(_time.time() // 60)
+    rng = _random.Random(f"{seed_key}-{bucket}")
+    return [rng.uniform(lo, hi) for _ in range(n)]
+
+
+def _loadavg():
+    l1, l5, l15 = _tick("load", 0.15, 0.45, 3)
+    return f"{l1:.2f}, {l5:.2f}, {l15:.2f}"
+
+
+def _uptime_clock():
+    s = int(_uptime_sec())
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m, _ = divmod(s, 60)
+    return f"{d} days, {h}:{m:02d}"
+
+FAKE_CPUINFO = "".join(
+    f"processor\t: {i}\r\nvendor_id\t: GenuineIntel\r\n"
+    f"cpu family\t: 6\r\nmodel\t\t: 143\r\n"
+    f"model name\t: Intel(R) Xeon(R) Platinum 8488C\r\n"
+    f"cpu MHz\t\t: 2992.969\r\ncache size\t: 107520 KB\r\n"
+    f"flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc\r\n"
+    f"bogomips\t: 5985.93\r\n\r\n"
+    for i in range(NCPU)
 )
 
 FAKE_MEMINFO = (
-    "MemTotal:        4024548 kB\r\nMemFree:         2876116 kB\r\n"
-    "MemAvailable:    3420900 kB\r\nSwapTotal:             0 kB\r\n"
+    "MemTotal:       98810880 kB\r\nMemFree:        71234560 kB\r\n"
+    "MemAvailable:   88200192 kB\r\nBuffers:          812032 kB\r\n"
+    "Cached:         14212352 kB\r\nSwapTotal:             0 kB\r\n"
+    "SwapFree:                0 kB\r\n"
 )
+
+FAKE_UPTIME = None  # computed live via _fake_uptime()
+
+
+def _fake_uptime():
+    u = _uptime_sec()
+    return f"{u:.2f} {u * 31:.2f}"
+
+FAKE_OS_RELEASE = (
+    'NAME="Ubuntu"\r\nVERSION="24.04.1 LTS (Noble Numbat)"\r\nID=ubuntu\r\n'
+    'ID_LIKE=debian\r\nPRETTY_NAME="Ubuntu 24.04.1 LTS"\r\nVERSION_ID="24.04"\r\n'
+    'HOME_URL="https://www.ubuntu.com/"\r\n'
+)
+
+LSPCI = (
+    "00:00.0 Host bridge: Intel Corporation 440FX - 82441FX PMC [Natoma]\r\n"
+    "00:01.0 ISA bridge: Intel Corporation 82371SB PIIX3 ISA [Natoma/Triton II]\r\n"
+    "00:03.0 VGA compatible controller: Amazon.com, Inc. NVMe SSD Controller\r\n"
+    "00:1e.0 VGA compatible controller: Cirrus Logic GD 5446\r\n"
+    "00:1f.0 3D controller: NVIDIA Corporation GA100 [A100 PCIe 40GB] (rev a1)\r\n"
+)
+
+def _nvidia_smi():
+    temp = int(_tick("gpu-temp", 33, 38)[0])
+    watts = int(_tick("gpu-watts", 68, 76)[0])
+    return (
+        "+-----------------------------------------------------------------------------+\r\n"
+        "| NVIDIA-SMI 550.54.15    Driver Version: 550.54.15    CUDA Version: 12.4     |\r\n"
+        "|-------------------------------+----------------------+----------------------+\r\n"
+        "|   0  NVIDIA A100 40GB      On   | 00000000:00:1F.0 Off |                    0 |\r\n"
+        f"| N/A   {temp}C    P0             {watts}W /  250W |      0MiB /  40960MiB |      0%      Default |\r\n"
+        "+-----------------------------------------------------------------------------+\r\n"
+    )
+
+
+NVIDIA_SMI = ""  # computed live via _nvidia_smi()
+
+UNAME_V = "#41-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug  1 16:25:12 UTC 2026"
 
 LS_LONG = (
     "total 32\r\n"
@@ -81,14 +153,22 @@ PS_AUX = (
     "ubuntu      1240  0.0  0.0  22200  5300 pts/0    Ss   11:02   0:00 -bash\r\n"
 )
 
-TOP_SNAP = (
-    "top - 11:02:14 up 34 days,  2:11,  1 user,  load average: 0.08, 0.03, 0.01\r\n"
-    "Tasks: 112 total,   1 running, 111 sleeping,   0 stopped,   0 zombie\r\n"
-    "%Cpu(s):  2.1 us,  0.7 sy,  0.0 ni, 97.0 id,  0.1 wa,  0.0 hi,  0.1 si\r\n"
-    "MiB Mem :   3930.2 total,   2808.4 free,    612.8 used,    509.0 buff/cache\r\n"
-    "    PID USER      PR  NI    VIRT    RES  %CPU  %MEM     TIME+ COMMAND\r\n"
-    "    812 www-data  20   0   41200  18200   1.2   0.4   0:11.32 apache2\r\n"
-)
+def _top_snap():
+    idle = _tick("cpu-idle", 97.5, 99.2)[0]
+    us = 100 - idle - 0.6
+    free = int(_tick("mem-free", 69500, 71200)[0])
+    used = int(_tick("mem-used", 7800, 8500)[0])
+    return (
+        f"top - {datetime.now().strftime('%H:%M:%S')} up {_uptime_clock()},  1 user,  load average: {_loadavg()}\r\n"
+        "Tasks: 418 total,   1 running, 417 sleeping,   0 stopped,   0 zombie\r\n"
+        f"%Cpu(s):  {us:.1f} us,  0.4 sy,  0.0 ni, {idle:.1f} id,  0.0 wa,  0.0 hi,  0.1 si\r\n"
+        f"MiB Mem :  96483.0 total,  {free:.1f} free,     {used:.1f} used,   18245.8 buff/cache\r\n"
+        "    PID USER      PR  NI    VIRT    RES  %CPU  %MEM     TIME+ COMMAND\r\n"
+        "    812 www-data  20   0   41200  18200   1.2   0.0   0:11.32 apache2\r\n"
+    )
+
+
+TOP_SNAP = ""  # computed live via _top_snap()
 
 SS_LISTEN = (
     "State  Recv-Q Send-Q  Local Address:Port   Peer Address:Port\r\n"
@@ -100,19 +180,26 @@ SS_LISTEN = (
 
 DF_H = (
     "Filesystem      Size  Used Avail Use% Mounted on\r\n"
-    "/dev/sda1        49G   14G   33G  30% /\r\n"
-    "tmpfs           2.0G     0  2.0G   0% /dev/shm\r\n"
+    "/dev/nvme0n1p1  197G   38G  150G  21% /\r\n"
+    "tmpfs            48G     0   48G   0% /dev/shm\r\n"
 )
 
 FREE_M = (
     "               total        used        free      shared  buff/cache   available\r\n"
-    "Mem:            3930         612        2808          12         509        3340\r\n"
+    "Mem:           96483        8124       70112         212        18245       86120\r\n"
+    "Swap:              0           0           0\r\n"
+)
+
+FREE_G = (
+    "               total        used        free      shared  buff/cache   available\r\n"
+    "Mem:              94           7          68           0          17          84\r\n"
     "Swap:              0           0           0\r\n"
 )
 
 LSCPU_SHORT = (
     "Architecture:             x86_64\r\n"
-    "  CPU(s):                 2\r\n"
+    "  CPU(s):                 32\r\n"
+    "  On-line CPU(s) list:    0-31\r\n"
     "  Model name:             Intel(R) Xeon(R) Platinum 8488C\r\n"
     "  CPU MHz:                2992.969\r\n"
 )
@@ -128,7 +215,12 @@ LAST_SHORT = (
     "reboot   system boot  6.8.0-41-generic Tue Sep  3 07:55   still running\r\n"
 )
 
-W_SHORT = " 11:02:14 up 34 days,  2:11,  1 user,  load average: 0.08, 0.03, 0.01\r\nUSER     TTY      LOGIN@   IDLE   WHAT\r\nubuntu   pts/0     11:02    0.00s  -bash\r\n"
+def _w_short():
+    return (f" {datetime.now().strftime('%H:%M:%S')} up {_uptime_clock()},  1 user,  load average: {_loadavg()}\r\n"
+            "USER     TTY      LOGIN@   IDLE   WHAT\r\nubuntu   pts/0     11:02    0.00s  -bash\r\n")
+
+
+W_SHORT = ""  # computed live via _w_short()
 
 SYSTEMCTL_STATUS = (
     "● honey\r\n"
@@ -163,6 +255,21 @@ VERSIONS = {
 
 NOT_FOUND_TOOLS = {"nmap", "msfconsole", "msfvenom", "sqlmap", "hydra", "john", "hashcat", "gobuster", "nikto"}
 
+# commands that exist at absolute paths too (/bin/uname, /usr/bin/nproc, ...)
+KNOWN_CMDS = {
+    "uname", "arch", "nproc", "lscpu", "lspci", "cat", "grep", "awk", "sed",
+    "cut", "head", "tr", "dd", "sort", "uniq", "wc", "tac", "ls", "ps",
+    "top", "free", "df", "du", "echo", "printf", "pwd", "whoami", "id",
+    "hostname", "date", "who", "w", "last", "lastlog", "env", "printenv",
+    "crontab", "systemctl", "service", "journalctl", "mount", "dmesg",
+    "ifconfig", "ip", "ss", "netstat", "ping", "history", "python3",
+    "python", "perl", "ruby", "php", "node", "gcc", "git", "docker",
+    "mysql", "psql", "getconf", "command", "test", "[", "true", "false",
+    "read", "which", "type", "lsb_release", "hostnamectl", "timedatectl",
+    "nvidia-smi", "bash", "sh", "busybox", "toybox", "tee", "sleep",
+    "clear", "alias", "kill", "chmod", "touch", "mkdir",
+}
+
 
 class ShellState:
     def __init__(self, username: str, src_ip: str):
@@ -171,6 +278,11 @@ class ShellState:
         self.cwd = f"/home/{username}" if username else "/home/ubuntu"
         self.awaiting_sudo_pass = False
         self.pending_sudo_cmd = ""
+        home = f"/home/{username}" if username else "/home/ubuntu"
+        self.env = {"USER": username, "HOME": home, "PWD": self.cwd,
+                    "SHELL": "/bin/bash", "LANG": "C.UTF-8",
+                    "HOSTNAME": "honey",
+                    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
 
 
 def prompt(st: ShellState) -> str:
@@ -183,25 +295,64 @@ def initial_greeting(st: ShellState) -> str:
 
 
 def _expand(st: ShellState, text: str) -> str:
+    import re as _re2
     home = f"/home/{st.username}"
-    return (text.replace("$USER", st.username).replace("${USER}", st.username)
+
+    def _var(m):
+        name = m.group(1) or m.group(2)
+        if name in st.env:
+            return st.env[name]
+        return {"USER": st.username, "HOME": home, "PWD": st.cwd,
+                "HOSTNAME": "honey"}.get(name, m.group(0))
+    text = (text.replace("$USER", st.username).replace("${USER}", st.username)
             .replace("$HOME", home).replace("${HOME}", home)
             .replace("$PWD", st.cwd).replace("~", home)
             .replace("$HOSTNAME", "honey").replace("${HOSTNAME}", "honey"))
+    return _re2.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)",
+                    _var, text)
 
 
 def handle_line(st: ShellState, line: str):
-    """Returns (output_to_send, command_to_log_or_None, secret_kind)."""
+    """Entry point: compound lines go through the mini-shell."""
     raw = line.strip()
     if not raw:
         return prompt(st), None, None
-    # sudo password capture
     if st.awaiting_sudo_pass:
         st.awaiting_sudo_pass = False
         out = f"\r\nSorry, user {st.username} is not in the sudoers file. This incident will be reported.\r\n" + prompt(st)
         return out, f"[sudo-password] {raw}", "sudo-password"
+    from . import minish as _ms
+    if _ms.is_compound(raw):
+        depth = getattr(st, "_depth", 0)
+        if depth > 25:
+            return "\r\nbash: recursion too deep\r\n" + prompt(st), raw, None
+        st._depth = depth + 1
+        try:
+            body, code = _ms.run_script(st, raw)
+        except _ms._Exit:
+            body, code = "", 0
+        finally:
+            st._depth = depth
+        st.env["PWD"] = st.cwd
+        body = body.replace("\r\n", "\n")
+        return "\r\n" + body.replace("\n", "\r\n") + "\r\n" + prompt(st), raw, None
+    return handle_simple(st, raw)
+
+
+def handle_simple(st: ShellState, line: str):
+    """Single-command emulation (no shell operators). Never dispatches back."""
+    raw = line.strip()
+    if not raw:
+        return prompt(st), None, None
     parts = raw.split()
     cmd = parts[0]
+    # /bin/uname, /usr/bin/nproc, ./tool etc: resolve to basename when known
+    if "/" in cmd:
+        base = cmd.rsplit("/", 1)[-1]
+        if base in KNOWN_CMDS:
+            raw = base + raw[len(cmd):]
+            parts = raw.split()
+            cmd = parts[0]
     args = parts[1:]
     argstr = " ".join(args)
 
@@ -247,22 +398,45 @@ def handle_line(st: ShellState, line: str):
         return done("honey")
     if cmd == "uname":
         if "-a" in args or not args:
-            return done("Linux honey 6.8.0-41-generic #41-Ubuntu SMP x86_64 GNU/Linux")
-        if "-r" in args:
-            return done("6.8.0-41-generic")
-        if "-m" in args or "-p" in args:
-            return done("x86_64")
-        return done("Linux")
+            return done(f"Linux honey 6.8.0-41-generic {UNAME_V} x86_64 x86_64 x86_64 GNU/Linux")
+        out = []
+        for a in args:
+            if a == "-s":
+                out.append("Linux")
+            elif a == "-n":
+                out.append("honey")
+            elif a == "-r":
+                out.append("6.8.0-41-generic")
+            elif a == "-v":
+                out.append(UNAME_V)
+            elif a in ("-m", "-p", "-i"):
+                out.append("x86_64")
+            elif a == "-o":
+                out.append("GNU/Linux")
+        return done(" ".join(out) if out else "Linux")
     if cmd == "arch":
         return done("x86_64")
+    if cmd == "nproc":
+        return done(str(NCPU))
+    if cmd == "lspci":
+        return done(LSPCI.rstrip("\r\n"))
+    if cmd == "nvidia-smi":
+        if args and args[0] in ("-L", "--list-gpus"):
+            return done("GPU 0: NVIDIA A100 PCIe 40GB (UUID: GPU-9d3b1f2c-4a5e-4b6f-8c7d-9e0f1a2b3c4d)")
+        return done(_nvidia_smi().rstrip("\r\n"))
     if cmd == "uptime":
-        return done(" 11:02:14 up 34 days,  2:11,  1 user,  load average: 0.08, 0.03, 0.01")
+        if args and args[0] in ("-p", "--pretty"):
+            d = int(_uptime_sec() // 86400)
+            return done(f"up {d} days")
+        if args and args[0] == "-s":
+            return done("2026-09-03 07:55:12")
+        return done(f" {datetime.now().strftime('%H:%M:%S')} up {_uptime_clock()},  1 user,  load average: {_loadavg()}")
     if cmd == "date":
         return done(datetime.now().strftime("%a %b %d %I:%M:%S %p UTC %Y"))
     if cmd == "who":
         return done("ubuntu   pts/0        2026-10-07 11:02 (203.0.113.44)")
     if cmd == "w":
-        return done(W_SHORT.rstrip("\r\n"))
+        return done(_w_short().rstrip("\r\n"))
     if cmd == "last":
         return done(LAST_SHORT.rstrip("\r\n"))
     if cmd == "lastlog":
@@ -309,6 +483,8 @@ def handle_line(st: ShellState, line: str):
             if "version" in raw and "cpuinfo" not in raw:
                 return done("Linux version 6.8.0-41-generic (buildd@lcy02-amd64-101) #41-Ubuntu SMP PREEMPT_DYNAMIC")
             return done(FAKE_CPUINFO.rstrip("\r\n"))
+        if "uptime" in raw and "/proc/" in raw:
+            return done(_fake_uptime())
         if "meminfo" in raw:
             return done(FAKE_MEMINFO.rstrip("\r\n"))
         if "config.php" in raw:
@@ -323,10 +499,12 @@ def handle_line(st: ShellState, line: str):
     if cmd == "ps":
         return done(PS_AUX.rstrip("\r\n"))
     if cmd == "top":
-        return done(TOP_SNAP.rstrip("\r\n"))
+        return done(_top_snap().rstrip("\r\n"))
     if cmd == "htop":
         return done("Error opening terminal: unknown.")
     if cmd in ("free", "vmstat"):
+        if "-g" in args:
+            return done(FREE_G.rstrip("\r\n"))
         return done(FREE_M.rstrip("\r\n"))
     if cmd == "df":
         return done(DF_H.rstrip("\r\n"))
@@ -452,5 +630,9 @@ def handle_line(st: ShellState, line: str):
     if cmd in NOT_FOUND_TOOLS:
         return done(f"bash: {cmd}: command not found")
     if cmd.startswith("./") or cmd.startswith("/"):
-        return done(f"bash: {cmd}: Permission denied")
+        base = cmd.rsplit("/", 1)[-1]
+        # executing a known directory or missing path: match real bash
+        if cmd.rstrip("/") in FAKE_FILES or base in ("app", "snap", "html"):
+            return done(f"bash: {cmd}: Is a directory")
+        return done(f"bash: {cmd}: No such file or directory")
     return done(f"bash: {cmd}: command not found")

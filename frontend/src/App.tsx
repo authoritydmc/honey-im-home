@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Activity, Eye, EyeOff, KeyRound, LayoutDashboard, ListOrdered, LogIn, Radio, ShieldAlert, ShieldCheck, TerminalSquare } from 'lucide-react'
+import { Activity, BrainCircuit, Eye, EyeOff, KeyRound, LayoutDashboard, ListOrdered, LogIn, Radio, ShieldAlert, ShieldCheck, TerminalSquare } from 'lucide-react'
 import { api, type AuthStatus } from './lib/api'
 import { Overview } from './views/Overview'
 import { Live } from './views/Live'
 import { Attackers } from './views/Attackers'
 import { Sessions } from './views/Sessions'
 import { Commands, Credentials } from './views/Intel'
+import { Intent } from './views/Intent'
 
-type Tab = 'overview' | 'live' | 'attackers' | 'sessions' | 'creds' | 'cmds'
+type Tab = 'overview' | 'intent' | 'live' | 'attackers' | 'sessions' | 'creds' | 'cmds'
 
 const TABS: { id: Tab; label: string; icon: typeof Activity }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'intent', label: 'Intent', icon: BrainCircuit },
   { id: 'live', label: 'Live', icon: Radio },
   { id: 'attackers', label: 'Attackers', icon: ShieldAlert },
   { id: 'sessions', label: 'Sessions', icon: ListOrdered },
@@ -83,6 +85,7 @@ export default function App() {
       </header>
       <main className="max-w-6xl mx-auto px-4 py-4">
         {tab === 'overview' && <Overview mask={mask} />}
+        {tab === 'intent' && <Intent mask={mask} />}
         {tab === 'live' && <Live mask={mask} />}
         {tab === 'attackers' && <Attackers mask={mask} />}
         {tab === 'sessions' && <Sessions mask={mask} />}

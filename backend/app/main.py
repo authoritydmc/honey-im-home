@@ -8,6 +8,7 @@ from jose import jwt
 from passlib.context import CryptContext
 
 from . import db as dbmod
+from . import intent as intentmod
 from .honeypot import start_honeypot
 
 SECRET = os.environ.get("SECRET_KEY", "dev-secret-change-me-32-chars!!")
@@ -105,6 +106,18 @@ def login(body: dict):
 @app.get("/api/storage")
 def storage(_=Depends(require_auth)):
     return {**dbmod.storage_stats(), "db": "postgres" if dbmod.use_postgres() else "sqlite"}
+
+
+@app.get("/api/insights")
+def insights(limit: int = 500, _=Depends(require_auth)):
+    """What attackers tried to do: classified command intents + notes."""
+    d = dbmod.db()
+    rows = d.execute("SELECT command FROM commands ORDER BY ts DESC LIMIT ?", (limit,))
+    cmds = [r["command"] if isinstance(r, dict) else r[0] for r in rows]
+    cards = intentmod.summarize(cmds)
+    return {"total": len(cmds), "intents": cards,
+            "profile": {"note": "Attackers see a 32-vCPU / 96GB RAM / NVIDIA A100 box "
+                                "with 36d uptime — juicy enough to mine on, fake enough to be safe."}}
 
 @app.get("/api/stats")
 def stats(_=Depends(require_auth)):

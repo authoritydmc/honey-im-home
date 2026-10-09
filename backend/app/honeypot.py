@@ -127,12 +127,12 @@ async def handle_client(process: asyncssh.SSHServerProcess):
             out, logged, _ = handle_line(st, cmd)
             d = dbmod.db()
             d.execute("INSERT INTO commands(session_id,ts,username,cwd,command,output_preview) VALUES(?,?,?,?,?,?)",
-                      (server.session_id, time.time(), st.username, st.cwd, (logged or cmd)[:2000], out[:500]))
+                      (server.session_id, time.time(), st.username, st.cwd, (logged or cmd)[:65535], out[:500]))
             d.execute("INSERT INTO tty_events(session_id,ts,kind,data) VALUES(?,?,?,?)",
-                      (server.session_id, time.time(), "exec", cmd[:2000]))
+                      (server.session_id, time.time(), "exec", cmd[:65535]))
             d.commit()
             msg = {"type": "cmd", "id": server.session_id, "ip": server.src_ip,
-                   "user": st.username, "cmd": (logged or cmd)[:2000], "ts": time.time()}
+                   "user": st.username, "cmd": (logged or cmd)[:65535], "ts": time.time()}
             dbmod.log_jsonl(msg)
             _live(msg)
             process.stdout.write(out)
@@ -159,12 +159,12 @@ async def handle_client(process: asyncssh.SSHServerProcess):
                     out, cmd, _ = handle_line(st, buf)
                     if cmd:
                         d.execute("INSERT INTO commands(session_id,ts,username,cwd,command,output_preview) VALUES(?,?,?,?,?,?)",
-                                  (server.session_id, time.time(), st.username, st.cwd, cmd[:2000], out[:500]))
+                                  (server.session_id, time.time(), st.username, st.cwd, cmd[:65535], out[:500]))
                         d.execute("INSERT INTO tty_events(session_id,ts,kind,data) VALUES(?,?,?,?)",
-                                  (server.session_id, time.time(), "line", cmd[:2000]))
+                                  (server.session_id, time.time(), "line", cmd[:65535]))
                         d.commit()
                         msg = {"type": "cmd", "id": server.session_id, "ip": server.src_ip,
-                               "user": st.username, "cmd": cmd[:2000], "ts": time.time()}
+                               "user": st.username, "cmd": cmd[:65535], "ts": time.time()}
                         dbmod.log_jsonl(msg)
                         _live(msg)
                     try:
