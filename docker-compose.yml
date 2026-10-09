@@ -4,8 +4,9 @@ services:
     image: ghcr.io/authoritydmc/honey-im-home:latest
     restart: unless-stopped
     ports:
-      - "2222:2222"
-      - "8078:8078"
+      # No public publish: WAN :22 reaches the trap via PREROUTING DNAT
+      # (see server-setups/scripts/firewall-docker-user.sh). Dashboard local-only.
+      - "127.0.0.1:8078:8078"
     env_file: .env
     environment:
       DATA_DIR: /srv/data
@@ -17,5 +18,17 @@ services:
     #   - "traefik.http.routers.honey.rule=Host(`honey.example.com`)"
     #   - "traefik.http.routers.honey.entrypoints=https"
     #   - "traefik.http.services.honey.loadbalancer.server.port=8078"
+    networks:
+      default: {}
+      backend: {}
+      edge:
+        ipv4_address: 10.0.2.50
 volumes:
   honey_data:
+networks:
+  backend:
+    external: true
+    name: dev-backend-network
+  edge:
+    external: true
+    name: coolify
