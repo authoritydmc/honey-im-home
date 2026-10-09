@@ -216,6 +216,8 @@ def handle_line(st: ShellState, line: str):
                 return done("")
             out2, _, _ = handle_line(st, rest)
             return out2, raw, None
+        if args and args[0] in ("-l", "-n", "-v", "--list"):
+            return done(f"User {st.username} may run the following commands on honey:\r\n    (root) NOPASSWD: /usr/bin/systemctl status *", kind="privesc")
         st.awaiting_sudo_pass = True
         st.pending_sudo_cmd = raw
         return f"\r\n[sudo] password for {st.username}: ", raw, None
@@ -303,7 +305,9 @@ def handle_line(st: ShellState, line: str):
             return done("honey")
         if "hosts" in raw:
             return done(FAKE_HOSTS.rstrip("\r\n"))
-        if "cpuinfo" in raw:
+        if "cpuinfo" in raw or "/proc/version" in raw:
+            if "version" in raw and "cpuinfo" not in raw:
+                return done("Linux version 6.8.0-41-generic (buildd@lcy02-amd64-101) #41-Ubuntu SMP PREEMPT_DYNAMIC")
             return done(FAKE_CPUINFO.rstrip("\r\n"))
         if "meminfo" in raw:
             return done(FAKE_MEMINFO.rstrip("\r\n"))
@@ -357,9 +361,20 @@ def handle_line(st: ShellState, line: str):
     if cmd == "systemctl":
         sub = args[0] if args else "status"
         if sub == "status" or not args:
+            tgt = args[1] if len(args) > 1 else ""
+            if tgt in ("ssh", "sshd"):
+                return done("● ssh.service - OpenBSD Secure Shell server\r\n     Loaded: loaded (/lib/systemd/system/ssh.service; enabled)\r\n     Active: active (running)")
             return done(SYSTEMCTL_STATUS.rstrip("\r\n"))
+        if sub in ("is-active", "is-enabled"):
+            return done("active" if sub == "is-active" else "enabled")
+        if sub in ("list-units", "list-unit-files"):
+            return done("  ssh.service        loaded active running   OpenBSD Secure Shell server\r\n  cron.service       loaded active running   Regular background program processing daemon\r\n  apache2.service    loaded active running   The Apache HTTP Server")
+        if sub in ("start", "stop", "restart", "reload", "enable", "disable"):
+            return done(f"==== AUTHENTICATING FOR org.freedesktop.systemd1.manage-units ====\r\nAuthentication is required to {sub} '{args[1] if len(args) > 1 else ''}'.", kind="privesc")
         return done("")
     if cmd == "service":
+        if len(args) >= 2 and args[1] in ("start", "stop", "restart", "status"):
+            return done(f" * {args[0]} {args[1]} [ OK ]")
         return done(SERVICE_ALL.rstrip("\r\n"))
     if cmd == "journalctl":
         return done(JOURNAL_SHORT.rstrip("\r\n"))
@@ -391,6 +406,49 @@ def handle_line(st: ShellState, line: str):
         return done(f"{cmd}: Permission denied.", kind="privesc")
     if cmd == "ssh-keygen":
         return done("Generating public/private ed25519 key pair.\r\nYour public key has been saved in /home/%s/.ssh/id_ed25519.pub" % st.username, kind="privesc")
+    # --- realism pack: common recon / persistence / miner-dropper commands ---
+    if cmd == "lsb_release":
+        return done('Distributor ID:\tUbuntu\r\nDescription:\tUbuntu 24.04.1 LTS\r\nRelease:\t24.04\r\nCodename:\tnoble')
+    if cmd == "hostnamectl":
+        return done(" Static hostname: honey\r\n       Icon name: computer-vm\r\n         Machine ID: 9d3b1f2c4a5e4b6f8c7d9e0f1a2b3c4d\r\n            Boot ID: 1a2b3c4d5e6f7890abcdef1234567890\r\n  Virtualization: kvm\r\nOperating System: Ubuntu 24.04.1 LTS\r\n            Kernel: Linux 6.8.0-41-generic")
+    if cmd == "timedatectl":
+        return done("               Local time: " + datetime.now().strftime("%a %Y-%m-%d %H:%M:%S UTC") + "\r\n           Universal time: " + datetime.now().strftime("%a %Y-%m-%d %H:%M:%S UTC") + "\r\n                 Time zone: Etc/UTC (UTC, +0000)")
+    if raw.startswith("cat /proc/"):
+        if "version" in raw:
+            return done("Linux version 6.8.0-41-generic (buildd@lcy02-amd64-101) #41-Ubuntu SMP PREEMPT_DYNAMIC")
+        return done(f"cat: {args[-1] if args else ''}: No such file or directory")
+    if cmd == "docker" or raw.startswith("docker "):
+        if "ps" in raw:
+            return done("CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES")
+        return done("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?")
+    if cmd == "tac" and args and args[0].startswith("/proc/"):
+        return done("Linux version 6.8.0-41-generic #41-Ubuntu SMP PREEMPT_DYNAMIC")
+    if cmd in ("nc", "ncat", "netcat", "busybox"):
+        return done(f"bash: {cmd}: command not found" if cmd == "busybox" else "Ncat: Connection timed out.", kind="lateral")
+    if cmd in ("pkill", "kill", "killall", "nohup"):
+        return done("")
+    if cmd == "clear" or cmd == "reset":
+        return done("\x1b[H\x1b[2J")
+    if cmd == "alias":
+        return done("alias ll='ls -alF'\r\nalias la='ls -A'")
+    if cmd == "printenv" or (cmd == "env" and args and args[0] == "|"):
+        return done(f"USER={st.username}\r\nHOME=/home/{st.username}\r\nSHELL=/bin/bash\r\nPWD={st.cwd}\r\nLANG=C.UTF-8")
+    if raw.startswith("env | grep") or raw.startswith("printenv "):
+        return done("")
+    if cmd == "sleep":
+        return done("")
+    if cmd in ("python3", "python") and ("-c" in args or len(args) > 0 and args[0].endswith(".py")):
+        return done("")
+    if "xmrig" in raw or "miner" in raw or "kdevtmpfsi" in raw or "kinsing" in raw:
+        return done("bash: ./xmrig: cannot execute binary file: Exec format error", kind="malware")
+    if cmd == "chmod" and ("+x" in raw):
+        return done("")
+    if raw.endswith("&") or "nohup " in raw or "setsid " in raw:
+        return done("[1] 1843")
+    if cmd in ("tput", "stty", "screen", "tmux"):
+        return done("")
+    if cmd in ("useradd", "adduser") or raw.startswith("echo ") and ">>" in raw and ("passwd" in raw or "shadow" in raw or "authorized_keys" in raw):
+        return done("bash: /etc/passwd: Permission denied", kind="privesc")
     if cmd in NOT_FOUND_TOOLS:
         return done(f"bash: {cmd}: command not found")
     if cmd.startswith("./") or cmd.startswith("/"):

@@ -152,17 +152,16 @@ async def handle_client(process: asyncssh.SSHServerProcess):
     buf = ""
     try:
         async for data in process.stdin:
-            # log keystroke timing
-            d = dbmod.db()
-            d.execute("INSERT INTO tty_events(session_id,ts,kind,data) VALUES(?,?,?,?)",
-                      (server.session_id, time.time(), "key", data[:500]))
-            d.commit()
+            # NOTE: no per-keystroke DB writes (write amplification). Only
+            # completed lines are logged as kind="line".
             for ch in data:
                 if ch in ("\r", "\n"):
                     out, cmd, _ = handle_line(st, buf)
                     if cmd:
                         d.execute("INSERT INTO commands(session_id,ts,username,cwd,command,output_preview) VALUES(?,?,?,?,?,?)",
                                   (server.session_id, time.time(), st.username, st.cwd, cmd[:2000], out[:500]))
+                        d.execute("INSERT INTO tty_events(session_id,ts,kind,data) VALUES(?,?,?,?)",
+                                  (server.session_id, time.time(), "line", cmd[:2000]))
                         d.commit()
                         msg = {"type": "cmd", "id": server.session_id, "ip": server.src_ip,
                                "user": st.username, "cmd": cmd[:2000], "ts": time.time()}

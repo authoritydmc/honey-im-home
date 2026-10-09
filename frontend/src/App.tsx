@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, Eye, EyeOff, KeyRound, LayoutDashboard, ListOrdered, Radio, ShieldAlert, TerminalSquare } from 'lucide-react'
+import { Activity, Eye, EyeOff, KeyRound, LayoutDashboard, ListOrdered, LogIn, Radio, ShieldAlert, ShieldCheck, TerminalSquare } from 'lucide-react'
 import { api, type AuthStatus } from './lib/api'
 import { Overview } from './views/Overview'
 import { Live } from './views/Live'
@@ -19,69 +19,55 @@ const TABS: { id: Tab; label: string; icon: typeof Activity }[] = [
 ]
 
 export default function App() {
-  const [token, setToken] = useState('')
   const [proxyUser, setProxyUser] = useState<string | null>(null)
-  const [pw, setPw] = useState('')
+  const [authUrl, setAuthUrl] = useState('')
   const [tab, setTab] = useState<Tab>('overview')
   const [mask, setMask] = useState(true)
   const [booted, setBooted] = useState(false)
 
   useEffect(() => {
-    // Behind the auth proxy the edge injects identity: no token needed.
-    // Token login is only for direct, no-proxy access.
+    // SSO-only: the edge (Traefik ForwardAuth -> Authentik) injects identity.
+    // No app password exists. If no identity header is present the user is
+    // not signed in at the edge -> show the SSO sign-in button.
     const boot = async () => {
       try {
-        const a = await api<AuthStatus>('/api/auth')
+        const a = await api<AuthStatus & { auth_url?: string }>('/api/auth')
         if (a.mode === 'sso' && a.user) { setProxyUser(a.user); return }
-      } catch { /* not proxied, fall through */ }
-      const t = localStorage.getItem('honey-token')
-      if (t) {
-        try { setToken(t); await api('/api/stats', t); return }
-        catch { localStorage.removeItem('honey-token'); setToken('') }
-      }
+        if (a.auth_url) setAuthUrl(a.auth_url)
+      } catch { /* backend unreachable */ }
       setBooted(true)
     }
     boot().finally(() => setBooted(true))
   }, [])
 
-  const authed = proxyUser !== null || token !== ''
-  const effToken = token || undefined
-
-  const login = async () => {
-    const r = await fetch('/api/auth/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pw }),
-    })
-    if (!r.ok) return alert('bad password')
-    const j = await r.json() as { token: string }
-    localStorage.setItem('honey-token', j.token)
-    setToken(j.token)
-  }
-
-  if (!authed && booted) {
+  if (!proxyUser && booted) {
     return (
       <div className="min-h-screen grid place-items-center bg-zinc-950 text-zinc-100 p-4">
-        <div className="p-8 rounded-2xl bg-zinc-900 border border-zinc-800 w-96 max-w-full">
+        <div className="p-8 rounded-2xl bg-zinc-900 border border-zinc-800 w-96 max-w-full text-center">
           <h1 className="text-xl font-bold">🍯 Honey I'm Home</h1>
-          <p className="text-xs text-zinc-500 mt-1">Sign in — not needed behind SSO</p>
-          <input type="password" value={pw} onChange={e => setPw(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') login() }}
-            placeholder="admin password" className="mt-4 w-full p-2 rounded bg-zinc-800 outline-none focus:ring-1 focus:ring-amber-500" />
-          <button onClick={login} className="mt-3 w-full p-2 rounded bg-amber-500 text-black font-bold">Sign in</button>
+          <p className="text-xs text-zinc-500 mt-1 flex items-center justify-center gap-1">
+            <ShieldCheck size={13} /> Protected by RajLabs SSO — no app password
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-5 w-full p-2.5 rounded-lg bg-amber-500 text-black font-bold flex items-center justify-center gap-2 hover:bg-amber-400">
+            <LogIn size={16} /> Sign in with SSO
+          </button>
+          <p className="text-[11px] text-zinc-500 mt-3">
+            Sign-in is handled by {authUrl ? <a className="underline" href={authUrl}>{authUrl}</a> : 'RajLabs SSO (Authentik)'} at the edge.
+          </p>
         </div>
       </div>
     )
   }
-  if (!authed) return <div className="min-h-screen grid place-items-center text-sm text-zinc-500">Loading trap intel…</div>
+  if (!proxyUser) return <div className="min-h-screen grid place-items-center text-sm text-zinc-500">Loading trap intel…</div>
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
           <h1 className="font-bold">🍯 Honey I'm Home</h1>
-          {proxyUser
-            ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">SSO · {proxyUser}</span>
-            : <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">token</span>}
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">SSO · {proxyUser}</span>
           <button onClick={() => setMask(!mask)} className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700">
             {mask ? <EyeOff size={14} /> : <Eye size={14} />}{mask ? 'Masked' : 'Visible'}
           </button>
@@ -96,12 +82,12 @@ export default function App() {
         </nav>
       </header>
       <main className="max-w-6xl mx-auto px-4 py-4">
-        {tab === 'overview' && <Overview token={effToken} mask={mask} />}
+        {tab === 'overview' && <Overview mask={mask} />}
         {tab === 'live' && <Live mask={mask} />}
-        {tab === 'attackers' && <Attackers token={effToken} mask={mask} />}
-        {tab === 'sessions' && <Sessions token={effToken} mask={mask} />}
-        {tab === 'creds' && <Credentials token={effToken} mask={mask} />}
-        {tab === 'cmds' && <Commands token={effToken} mask={mask} />}
+        {tab === 'attackers' && <Attackers mask={mask} />}
+        {tab === 'sessions' && <Sessions mask={mask} />}
+        {tab === 'creds' && <Credentials mask={mask} />}
+        {tab === 'cmds' && <Commands mask={mask} />}
       </main>
     </div>
   )

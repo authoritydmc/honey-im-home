@@ -18,6 +18,15 @@ services:
       HONEYPOT_PORT: 2222
       API_PORT: 8078
       TRUST_PROXY_AUTH: 1
+      SSO_ONLY: 1
+      AUTH_URL: https://auth.rajlabs.in
+      # Storage bounds: 2-day retention, 10GB max, jsonl rotation 100MB x3.
+      RETENTION_DAYS: ${RETENTION_DAYS:-2}
+      MAX_DB_GB: ${MAX_DB_GB:-10}
+      JSONL_MAX_MB: ${JSONL_MAX_MB:-100}
+      # Optional Postgres (shared dev-postgres): set DATABASE_URL to switch
+      # off sqlite. Honey gets its own DB via init script (see server-setups).
+      # DATABASE_URL: postgresql://honey:***@dev-postgres:5432/honey
     volumes:
       - honey_data:/srv/data
     networks:

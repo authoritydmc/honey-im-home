@@ -11,13 +11,15 @@ from . import db as dbmod
 from .honeypot import start_honeypot
 
 SECRET = os.environ.get("SECRET_KEY", "dev-secret-change-me-32-chars!!")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 API_PORT = int(os.environ.get("API_PORT", "8078"))
 HONEY_HOST = os.environ.get("HONEYPOT_HOST", "0.0.0.0")
 HONEY_PORT = int(os.environ.get("HONEYPOT_PORT", "2222"))
+SSO_ONLY = os.environ.get("SSO_ONLY", "1") == "1"  # default: SSO-only, no password login
+AUTH_URL = os.environ.get("AUTH_URL", "https://auth.rajlabs.in")
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-ADMIN_HASH = pwd.hash(ADMIN_PASSWORD)
+ADMIN_HASH = pwd.hash(ADMIN_PASSWORD) if ADMIN_PASSWORD else None
 security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="Honey I'm Home API")
@@ -26,8 +28,10 @@ live_queues: set[asyncio.Queue] = set()
 def make_token(role="admin"):
     return jwt.encode({"sub": role, "exp": time.time() + 12 * 3600}, SECRET, algorithm="HS256")
 
-PROXY_USER_HEADERS = ("X-Forwarded-User", "X-Forwarded-Email", "Remote-User",
-                        "Remote-Email", "Cf-Access-Authenticated-User-Email")
+PROXY_USER_HEADERS = ("X-authentik-username", "X-authentik-email", "X-authentik-name",
+                        "X-Forwarded-User", "X-Forwarded-Email", "X-Forwarded-Preferred-Username",
+                        "Remote-User", "Remote-Email", "Cf-Access-Authenticated-User-Email")
+SSO_ONLY = os.environ.get("SSO_ONLY", "0") == "1"
 
 
 def proxy_user(request: Request):
@@ -59,6 +63,17 @@ def require_auth(request: Request, cred: HTTPAuthorizationCredentials = Depends(
 async def _startup():
     dbmod.db()
     asyncio.create_task(start_honeypot(HONEY_HOST, HONEY_PORT))
+    asyncio.create_task(_purge_loop())
+
+
+async def _purge_loop():
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await asyncio.to_thread(dbmod.purge_old)
+        except Exception:
+            pass
+        await asyncio.sleep(3600)
 
 @app.get("/healthz")
 def healthz():
@@ -69,14 +84,27 @@ def auth_status(request: Request):
     u = proxy_user(request)
     if u:
         return {"mode": "sso", "login": "sso", "user": u}
+    if SSO_ONLY:
+        return {"mode": "sso", "login": "sso", "user": None,
+                "auth_url": AUTH_URL,
+                "hint": "Sign in via RajLabs SSO — no app password."}
     return {"mode": "token", "login": "password", "user": None}
 
 
 @app.post("/api/auth/login")
 def login(body: dict):
+    if SSO_ONLY or not ADMIN_HASH:
+        # Real SSO sign-in happens at the edge (Traefik ForwardAuth ->
+        # Authentik). There is intentionally no password form any more.
+        raise HTTPException(403, "password login disabled: use SSO sign-in")
     if not pwd.verify(body.get("password", ""), ADMIN_HASH):
         raise HTTPException(401, "bad password")
     return {"token": make_token()}
+
+
+@app.get("/api/storage")
+def storage(_=Depends(require_auth)):
+    return {**dbmod.storage_stats(), "db": "postgres" if dbmod.use_postgres() else "sqlite"}
 
 @app.get("/api/stats")
 def stats(_=Depends(require_auth)):
