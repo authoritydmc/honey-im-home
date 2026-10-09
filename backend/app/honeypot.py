@@ -2,7 +2,7 @@
 import asyncio, os, time, uuid
 import asyncssh
 from . import db as dbmod
-from .shell import ShellState, handle_line, initial_greeting
+from .shell import ShellState, handle_line, initial_greeting, DEFAULT_USER, clean_username
 
 BANNER = "OpenSSH_9.6p1 Ubuntu-3ubuntu13.5"
 
@@ -35,7 +35,7 @@ class HoneyServer(asyncssh.SSHServer):
         self.src_ip = src_ip
         self.src_port = src_port
         self.session_id = uuid.uuid4().hex[:12]
-        self.username = "ubuntu"
+        self.username = DEFAULT_USER
         self.client_version = ""
         self.conn = None
 
@@ -76,7 +76,7 @@ class HoneyServer(asyncssh.SSHServer):
         return True
 
     def validate_password(self, username, password):
-        self.username = username or "ubuntu"
+        self.username = clean_username(username)
         d = dbmod.db()
         d.execute("INSERT INTO auth_attempts(session_id,ts,username,password,method,success) VALUES(?,?,?,?,?,?)",
                   (self.session_id, time.time(), username, password, "password", 1))
@@ -91,6 +91,7 @@ class HoneyServer(asyncssh.SSHServer):
         return True
 
     def validate_public_key(self, username, key):
+        self.username = clean_username(username)
         fp = key.get_fingerprint() if hasattr(key, "get_fingerprint") else ""
         kt = key.get_algorithm() if hasattr(key, "get_algorithm") else "ssh-key"
         try:

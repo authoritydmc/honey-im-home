@@ -1,6 +1,15 @@
 """Ubuntu-style fake shell. Pure functions + per-session state. No real exec."""
 from datetime import datetime
 
+DEFAULT_USER = "i'mhome"
+
+def clean_username(raw):
+    """Attacker-supplied login -> safe display name (falls back to i'mhome)."""
+    u = (raw or "").strip().lower().lstrip(".")
+    u = "".join(c for c in u if c.isalnum() or c in ("_", "-", ".", "'"))
+    u = u.strip(".'")
+    return u[:32] or DEFAULT_USER
+
 MOTD = (
     "\r\nWelcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-41-generic x86_64)\r\n"
     " * Documentation:  https://help.ubuntu.com\r\n"
@@ -24,6 +33,11 @@ FAKE_SHADOW = (
 )
 
 FAKE_HOSTS = "127.0.0.1 localhost\r\n127.0.1.1 honey\r\n"
+
+def _passwd_for(user):
+    if user in ("root", "ubuntu"):
+        return FAKE_PASSWD
+    return FAKE_PASSWD + f"{user}:x:1000:1000::/home/{user}:/bin/bash\n"
 
 FAKE_CONFIG_PHP = (
     "<?php\r\n// app config -- do not commit\r\n"
@@ -215,9 +229,10 @@ LAST_SHORT = (
     "reboot   system boot  6.8.0-41-generic Tue Sep  3 07:55   still running\r\n"
 )
 
-def _w_short():
+def _w_short(user=None):
+    u = user or "ubuntu"
     return (f" {datetime.now().strftime('%H:%M:%S')} up {_uptime_clock()},  1 user,  load average: {_loadavg()}\r\n"
-            "USER     TTY      LOGIN@   IDLE   WHAT\r\nubuntu   pts/0     11:02    0.00s  -bash\r\n")
+            f"USER     TTY      LOGIN@   IDLE   WHAT\r\n{u}   pts/0     11:02    0.00s  -bash\r\n")
 
 
 W_SHORT = ""  # computed live via _w_short()
@@ -273,12 +288,13 @@ KNOWN_CMDS = {
 
 class ShellState:
     def __init__(self, username: str, src_ip: str):
+        username = clean_username(username)
         self.username = username
         self.src_ip = src_ip
-        self.cwd = f"/home/{username}" if username else "/home/ubuntu"
+        self.cwd = f"/home/{username}"
         self.awaiting_sudo_pass = False
         self.pending_sudo_cmd = ""
-        home = f"/home/{username}" if username else "/home/ubuntu"
+        home = f"/home/{username}"
         self.env = {"USER": username, "HOME": home, "PWD": self.cwd,
                     "SHELL": "/bin/bash", "LANG": "C.UTF-8",
                     "HOSTNAME": "honey",
@@ -436,15 +452,17 @@ def handle_simple(st: ShellState, line: str):
     if cmd == "who":
         return done("ubuntu   pts/0        2026-10-07 11:02 (203.0.113.44)")
     if cmd == "w":
-        return done(_w_short().rstrip("\r\n"))
+        return done(_w_short(st.username).rstrip("\r\n"))
     if cmd == "last":
-        return done(LAST_SHORT.rstrip("\r\n"))
+        return done(LAST_SHORT.replace("ubuntu", st.username).rstrip("\r\n"))
     if cmd == "lastlog":
         return done("Username         Port     From             Latest")
     if cmd == "ls":
         if any(a.startswith("-") and ("l" in a) for a in args):
-            return done(LS_LONG.rstrip("\r\n"))
-        files = FAKE_FILES.get(st.cwd, ["app", "data", ".bashrc"])
+            return done(LS_LONG.replace("ubuntu", st.username).rstrip("\r\n"))
+        files = FAKE_FILES.get(st.cwd)
+        if files is None:
+            files = FAKE_FILES["/home/ubuntu"] if st.cwd.startswith("/home/") else ["app", "data", ".bashrc"]
         if not any(a.startswith("-") and ("a" in a) for a in args):
             files = [f for f in files if not f.startswith(".")]
         return done("  ".join(files))
@@ -472,7 +490,7 @@ def handle_simple(st: ShellState, line: str):
                 return done(FAKE_SHADOW.rstrip("\r\n"))
             return done(f"cat: {target or '/etc/shadow'}: Permission denied")
         if "passwd" in raw:
-            return done(FAKE_PASSWD.replace("\n", "\r\n").rstrip("\r\n"))
+            return done(_passwd_for(st.username).replace("\n", "\r\n").rstrip("\r\n"))
         if "os-release" in raw:
             return done(FAKE_OS_RELEASE.rstrip("\r\n"))
         if "hostname" in raw and "hosts" not in raw:
@@ -497,7 +515,7 @@ def handle_simple(st: ShellState, line: str):
             return done(f"cat: {target}: No such file or directory")
         return done(f"cat: {target or ''}: No such file or directory")
     if cmd == "ps":
-        return done(PS_AUX.rstrip("\r\n"))
+        return done(PS_AUX.replace("ubuntu", st.username).rstrip("\r\n"))
     if cmd == "top":
         return done(_top_snap().rstrip("\r\n"))
     if cmd == "htop":
